@@ -390,16 +390,33 @@ class _SearchFieldState<T> extends State<SearchField<T>> {
     if (widget.controller == null) {
       searchController!.dispose();
     }
-    _searchFocus?.removeListener(() {});
-    _searchFocus?.dispose();
+    // Properly dispose focus node
+    if (_searchFocus != null) {
+      _searchFocus!.removeListener(_handleFocusChange);
+      if (widget.focusNode == null) {
+        // Only dispose if we created the focus node
+        _searchFocus!.dispose();
+      }
+    }
     removeOverlay();
     super.dispose();
   }
 
   void removeOverlay() {
-    if (_overlayEntry != null && _overlayEntry!.mounted) {
+    if (_overlayEntry != null) {
       isSuggestionsShown = false;
-      _overlayEntry?.remove();
+
+      // Safely remove overlay if it's still mounted
+      if (_overlayEntry!.mounted) {
+        try {
+          _overlayEntry!.remove();
+        } catch (e) {
+          if (kDebugMode) {
+            debugPrint('Error removing overlay: $e');
+          }
+        }
+      }
+
       _overlayEntry = null;
     }
   }
@@ -453,6 +470,8 @@ class _SearchFieldState<T> extends State<SearchField<T>> {
   }
 
   void _handleFocusChange() {
+    if (!mounted || _searchFocus == null) return;
+
     // When focus shifts to ListView prevent suggestions from rebuilding
     // when user navigates through suggestions using keyboard
     if (_searchFocus!.hasFocus) {
@@ -463,11 +482,15 @@ class _SearchFieldState<T> extends State<SearchField<T>> {
       _overlayEntry ??= _createOverlay();
       if (widget.suggestionState == Suggestion.expand) {
         isSuggestionsShown = true;
-        Future.delayed(Duration(milliseconds: 100), () {
-          suggestionStream.sink.add(widget.suggestions);
+        Future.delayed(const Duration(milliseconds: 100), () {
+          if (mounted && _searchFocus!.hasFocus) {
+            suggestionStream.sink.add(widget.suggestions);
+          }
         });
       }
-      Overlay.of(context).insert(_overlayEntry!);
+      if (!_overlayEntry!.mounted) {
+        Overlay.of(context).insert(_overlayEntry!);
+      }
     } else {
       removeOverlay();
       if (_suggestionDirection == SuggestionDirection.up) {
@@ -700,6 +723,23 @@ class _SearchFieldState<T> extends State<SearchField<T>> {
         searchController!.dispose();
       }
       searchController = widget.controller ?? TextEditingController();
+    }
+
+    // Handle focus node changes
+    if (oldWidget.focusNode != widget.focusNode) {
+      if (_searchFocus != null) {
+        _searchFocus!.removeListener(_handleFocusChange);
+        if (oldWidget.focusNode == null) {
+          // Only dispose the old focus node if we created it
+          _searchFocus!.dispose();
+        }
+      }
+      if (widget.focusNode != null) {
+        _searchFocus = widget.focusNode;
+      } else {
+        _searchFocus = FocusNode();
+      }
+      _searchFocus!.addListener(_handleFocusChange);
     }
     if (widget.suggestionDirection != oldWidget.suggestionDirection) {
       _suggestionDirection = widget.suggestionDirection;
